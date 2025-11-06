@@ -38,10 +38,11 @@ export class Tokenizer {
   subcontexts: Dict<Tokenizer.Context> = Object.create(null)
   parsers: Tokenizer.Parser[] = []
 
-  define(pattern: Tokenizer.Parser & Tokenizer.Context) {
-    if (this.parsers.find(p => p.initiator === pattern.initiator && p.depend === pattern.depend)) {
-      throw new Error(`Parser for initiator "${pattern.initiator}" and depend "${pattern.depend}" already exists.`)
+  define(pattern: Tokenizer.Definition) {
+    if (typeof pattern.depend === 'string') {
+      pattern.depend = [pattern.depend]
     }
+
     const c = this.subcontexts[pattern.initiator]
     if (c && (c.terminator !== pattern.terminator || c.inherit !== pattern.inherit)) {
       throw new Error(`Context for initiator "${pattern.initiator}" already exists.`)
@@ -52,11 +53,19 @@ export class Tokenizer {
         quoted: pattern.quoted ?? true,
       }
     }
+
+    const p = this.parsers.find(p => p.initiator === pattern.initiator && pattern.depend.includes(p.depend))
+    if (p) {
+      throw new Error(`Parser for initiator "${p.initiator}" and depend "${p.depend}" already exists.`)
+    }
+
     if (!isNullable(pattern.depend)) {
-      this.parsers.push({
-        initiator: pattern.initiator,
-        depend: pattern.depend,
-        parse: pattern.parse,
+      pattern.depend.forEach(depend => {
+        this.parsers.push({
+          initiator: pattern.initiator,
+          depend,
+          parse: pattern.parse,
+        })
       })
     }
   }
@@ -155,7 +164,6 @@ export class Tokenizer {
   }
 
   parse(source: string, terminator: string | RegExp = '', delimiter: string | RegExp = /\s+/, content: string = ''): Argv {
-    // console.log('Parsing source:', { source, terminator, delimiter, content })
     const tokens: Token[] = []
     source = h.parse(source).map((el) => {
       return el.type === 'text' ? el.toString() : whitespace.escape(el.toString())
@@ -168,7 +176,6 @@ export class Tokenizer {
 
     // eslint-disable-next-line no-unmodified-loop-condition
     while (rest && !(terminator && (terminatorRegExp.exec(rest) || terminatorRegExp.exec(term)))) {
-      // console.log('rest:', rest, 'term:', term, 'stopReg:', stopReg)
       const token = this.parseToken(rest, stopReg, content)
       rest = token.rest
       term = token.terminator
@@ -202,7 +209,6 @@ export namespace Tokenizer {
   export interface Context {
     terminator: string
     inherit?: string
-    // delimiter?: string | RegExp
     quoted?: boolean
   }
 
@@ -212,10 +218,19 @@ export namespace Tokenizer {
     parse?: (source: string) => Argv
   }
 
+  export interface Definition {
+    initiator: string
+    terminator?: string
+    inherit?: string
+    quoted?: boolean
+    depend?: string | string[]
+    parse?: (source: string) => Argv
+  }
+
   export function setupDefaultTokenizer(tokenizer: Tokenizer) {
     tokenizer.define({
       initiator: '',
-      terminator: null,
+      terminator: '',
       quoted: false,
     })
 
@@ -250,15 +265,7 @@ export namespace Tokenizer {
       terminator: ')',
       inherit: '',
       quoted: false,
-      depend: '',
-    })
-
-    tokenizer.define({
-      initiator: '$(',
-      terminator: ')',
-      inherit: '',
-      quoted: false,
-      depend: `"`,
+      depend: ['', '"'],
     })
 
     tokenizer.define({
@@ -266,18 +273,16 @@ export namespace Tokenizer {
       terminator: '',
       depend: '',
       parse(source: string) {
-        if (source.length) {
-          return {
-            tokens: [{ content: source[0], inters: [], quoted: false, terminator: '' }],
-            rest: source.slice(1),
-            source: source[0],
-            inline: true,
-          }
-        } else {
+        if (!source.length) {
           return {
             error: 'No character follows backslash',
             rest: source,
-            source: '',
+          }
+        } else {
+          return {
+            tokens: [{ content: source[0], inters: [], quoted: false, terminator: '' }],
+            rest: source.slice(1),
+            inline: true,
           }
         }
       },
@@ -286,20 +291,94 @@ export namespace Tokenizer {
     tokenizer.define({
       initiator: '\\',
       terminator: '',
-      depend: `"`,
+      depend: '"',
       parse(source: string) {
-        if (source.length) {
+        const allowedCharacters = `$\`"\\`
+        if (!source.length) {
           return {
-            tokens: [{ content: source[0], inters: [], quoted: false, initiator: '\\', terminator: '' }],
+            error: 'No character follows backslash',
+            rest: source,
+          }
+        } else if (allowedCharacters.includes(source[0])) {
+          return {
+            tokens: [{ content: source[0], inters: [], quoted: false, terminator: '' }],
             rest: source.slice(1),
-            source: source[0],
             inline: true,
           }
         } else {
           return {
+            tokens: [{ content: `\\`, inters: [], quoted: false, terminator: '' }],
+            rest: source,
+            inline: true,
+          }
+        }
+      },
+    })
+
+    tokenizer.define({
+      initiator: `$'`,
+      terminator: `'`,
+      depend: '',
+      parse(source: string) {
+        const argv = tokenizer.parse(source, `'`, '', `$'`)
+        return {
+          inline: true,
+          ...argv,
+        }
+      },
+    })
+
+    tokenizer.define({
+      initiator: '\\',
+      terminator: '',
+      depend: `$'`,
+      parse(source: string) {
+        if (!source.length) {
+          return {
             error: 'No character follows backslash',
             rest: source,
-            source: '',
+          }
+        }
+        let content: string
+
+        switch (source[0]) {
+          case 'n': content = '\n'; break
+          case 't': content = '\t'; break
+          case 'r': content = '\r'; break
+          case '\\': content = '\\'; break
+          case '\'': content = '\''; break
+          case '"': content = '"'; break
+          default:
+            if (/[0-7]/.test(source[0])) {
+              const match = /^[0-7]{1,3}/.exec(source)!
+              content = String.fromCharCode(parseInt(match[0], 8))
+              source = source.slice(match[0].length - 1)
+            } else if (source[0] === 'x') {
+              const match = /^x[0-9A-Fa-f]{1,2}/.exec(source)!
+              content = String.fromCharCode(parseInt(match[0].slice(1), 16))
+              source = source.slice(match[0].length - 1)
+            } else if (source[0] === 'u') {
+              const match = /^u[0-9A-Fa-f]{4}/.exec(source)!
+              content = String.fromCharCode(parseInt(match[0].slice(1), 16))
+              source = source.slice(match[0].length - 1)
+            } else if (source[0] === 'U') {
+              const match = /^U[0-9A-Fa-f]{8}/.exec(source)!
+              const codePoint = parseInt(match[0].slice(1), 16)
+              content = String.fromCodePoint(codePoint)
+              source = source.slice(match[0].length - 1)
+            }
+        }
+        if (content) {
+          return {
+            tokens: [{ content, inters: [], quoted: false, terminator: '' }],
+            rest: source.slice(1),
+            inline: true,
+          }
+        } else {
+          return {
+            tokens: [{ content: '\\', inters: [], quoted: false, terminator: '' }],
+            rest: source,
+            inline: true,
           }
         }
       },

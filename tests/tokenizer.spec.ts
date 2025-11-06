@@ -1,36 +1,36 @@
-import { App, Argv } from 'koishi'
+import { App, Argv, h } from 'koishi'
 import { expect } from 'chai'
 import * as _command from '../src'
 
-const app = new App()
+describe('command', () => {
+  const app = new App()
 
-app.plugin(_command)
+  app.plugin(_command)
 
-const parse = (source: string, terminator = '') => Argv.parse(source, terminator).tokens?.map(token => token.content)
+  const parse = (source: string, terminator = '') => Argv.parse(source, terminator).tokens?.map(token => token.content)
 
-const parseInter = (source: string, terminator = '') => {
-  const tokens: string[][] = []
-  const collect = (argv: Argv) => {
-    if (argv.tokens) {
-      tokens.push(argv.tokens.map(token => token.content))
-      for (const { inters } of argv.tokens) {
-        inters.forEach(collect)
+  const parseInter = (source: string, terminator = '') => {
+    const tokens: string[][] = []
+    const collect = (argv: Argv) => {
+      if (argv.tokens) {
+        tokens.push(argv.tokens.map(token => token.content))
+        for (const { inters } of argv.tokens) {
+          inters.forEach(collect)
+        }
       }
     }
+    collect(Argv.parse(source, terminator))
+    return tokens
   }
-  collect(Argv.parse(source, terminator))
-  return tokens
-}
 
-const applyInter = (argv: Argv) => '[' + argv.tokens!.map((token) => {
-  let content = token.content
-  for (const inter of token.inters.slice().reverse()) {
-    content = content.slice(0, inter.pos) + applyInter(inter) + content.slice(inter.pos)
-  }
-  return content
-}).join(' ') + ']'
+  const applyInter = (argv: Argv) => '[' + argv.tokens!.map((token) => {
+    let content = token.content
+    for (const inter of token.inters.slice().reverse()) {
+      content = content.slice(0, inter.pos) + applyInter(inter) + content.slice(inter.pos)
+    }
+    return content
+  }).join(' ') + ']'
 
-describe('command', () => {
   it('parse', async () => {
     expect(parse('a b c')).to.deep.equal(['a', 'b', 'c'])
     expect(parse('a b  c\t\r\n dd ')).to.deep.equal(['a', 'b', 'c', 'dd'])
@@ -60,10 +60,10 @@ describe('command', () => {
   })
 
   it('quoted backslash', async () => {
-    expect(parse(`a "b\\ c"`)).to.deep.equal(['a', 'b c'])
-    expect(parse(`a "b\\ c\\r" "d\\\\"`)).to.deep.equal(['a', 'b cr', 'd\\'])
+    expect(parse(`a "b\\ c\\"\\$\\\\\\\`"`)).to.deep.equal(['a', 'b\\ c"$\\\`'])
     expect(parse(`a 'b\\ c'`)).to.deep.equal(['a', 'b\\ c'])
     expect(parse(`a 'b\\ c\\r' 'd\\\\'`)).to.deep.equal(['a', 'b\\ c\\r', 'd\\\\'])
+    expect(parse(`a $'\\ \\n\\t\\r\\\\\\'\\"\\012\\xAA\\u2001\\U0001F600'`)).to.deep.equal([`a`, `\\ \n\t\r\\\'"\x0A\xAA\u2001${String.fromCodePoint(0x1F600)}`])
   })
 
   it('stringify', async () => {

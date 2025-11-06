@@ -1,7 +1,7 @@
 {
   "name": "@hieuzest/koishi-plugin-command",
   "description": "Better command tokenizer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "main": "lib/index.cjs",
   "module": "lib/index.mjs",
