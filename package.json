@@ -1,22 +1,41 @@
 {
   "name": "@hieuzest/koishi-plugin-command",
-  "description": "Better command/tokenizer",
-  "version": "0.0.1",
-  "main": "lib/index.js",
+  "description": "Better command tokenizer",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.cjs",
+  "module": "lib/index.mjs",
   "typings": "lib/index.d.ts",
   "files": [
     "lib",
     "dist"
   ],
+  "author": "Hieuzest <girkirin@hotmail.com>",
   "license": "MIT",
-  "scripts": {},
   "keywords": [
     "chatbot",
     "koishi",
-    "plugin"
+    "plugin",
+    "command"
   ],
-  "devDependencies": {},
+  "scripts": {
+    "test": "mocha --exit -r esbuild-register -r yml-register tests/*.spec.ts"
+  },
   "peerDependencies": {
     "koishi": "^4.18.7"
+  },
+  "devDependencies": {
+    "@types/chai": "^5.2.3",
+    "@types/chai-as-promised": "^8.0.2",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.10.0",
+    "chai": "^6.2.0",
+    "chai-as-promised": "^8.0.2",
+    "esbuild": "^0.25.12",
+    "esbuild-register": "^3.6.0",
+    "koishi": "^4.18.7",
+    "mocha": "^11.7.4",
+    "typescript": "^5.9.3",
+    "yml-register": "^1.2.5"
   }
 }
