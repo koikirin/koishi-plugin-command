@@ -1,7 +1,7 @@
 {
   "name": "@hieuzest/koishi-plugin-command",
   "description": "Better command tokenizer",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "main": "lib/index.cjs",
   "module": "lib/index.mjs",
@@ -12,6 +12,11 @@
   ],
   "author": "Hieuzest <girkirin@hotmail.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/koikirin/koishi-plugin-command.git"
+  },
+  "homepage": "https://github.com/koikirin/koishi-plugin-command",
   "keywords": [
     "chatbot",
     "koishi",

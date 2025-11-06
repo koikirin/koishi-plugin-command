@@ -2,4 +2,4 @@
 
 [![npm](https://img.shields.io/npm/v/@hieuzest/koishi-plugin-command?style=flat-square)](https://www.npmjs.com/package/@hieuzest/koishi-plugin-command)
 
-Better command tokenizer
+A Plug-in command tokenizer substitute for Koishi v4 with Bash style backslash / quoting / ansi-c quoting
