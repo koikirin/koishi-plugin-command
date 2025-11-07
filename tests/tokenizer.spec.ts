@@ -63,7 +63,8 @@ describe('command', () => {
     expect(parse(`a "b\\ c\\"\\$\\\\\\\`"`)).to.deep.equal(['a', 'b\\ c"$\\\`'])
     expect(parse(`a 'b\\ c'`)).to.deep.equal(['a', 'b\\ c'])
     expect(parse(`a 'b\\ c\\r' 'd\\\\'`)).to.deep.equal(['a', 'b\\ c\\r', 'd\\\\'])
-    expect(parse(`a $'\\ \\n\\t\\r\\\\\\'\\"\\012\\xAA\\u2001\\U0001F600'`)).to.deep.equal([`a`, `\\ \n\t\r\\\'"\x0A\xAA\u2001${String.fromCodePoint(0x1F600)}`])
+    expect(parse(`a $'\\ \\a\\b\\e\\E\\f\\n\\r\\t\\v'`)).to.deep.equal([`a`, `\\ \x07\b\x1B\x1B\f\n\r\t\v`])
+    expect(parse(`a $'\\ \\\\\\'\\"\\012\\xAA\\u2001\\U0001F600'`)).to.deep.equal([`a`, `\\ \\\'"\x0A\xAA\u2001${String.fromCodePoint(0x1F600)}`])
   })
 
   it('stringify', async () => {

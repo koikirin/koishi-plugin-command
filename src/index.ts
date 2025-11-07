@@ -21,11 +21,15 @@ declare module 'koishi' {
 }
 
 export interface Config {
-  provideTokenizerService?: boolean
+  provideTokenizerService: boolean
+  enableInterpolation: boolean
+  enableANSICQuoting: boolean
 }
 
 export const Config: Schema<Config> = Schema.object({
   provideTokenizerService: Schema.boolean().default(true),
+  enableInterpolation: Schema.boolean().default(true),
+  enableANSICQuoting: Schema.boolean().default(true),
 })
 
 let oldArgv: typeof Argv & {
@@ -37,6 +41,14 @@ const whitespace = Argv.whitespace
 export class Tokenizer {
   subcontexts: Dict<Tokenizer.Context> = Object.create(null)
   parsers: Tokenizer.Parser[] = []
+
+  setDefaultTokenizer(tokenizer: Tokenizer) {
+    const oldTokenizer = Argv.defaultTokenizer
+    Argv.defaultTokenizer = tokenizer as any
+    return () => {
+      Argv.defaultTokenizer = oldTokenizer
+    }
+  }
 
   define(pattern: Tokenizer.Definition) {
     if (typeof pattern.depend === 'string') {
@@ -227,6 +239,8 @@ export namespace Tokenizer {
     parse?: (source: string) => Argv
   }
 
+  export let defaultConfig: Config
+
   export function setupDefaultTokenizer(tokenizer: Tokenizer) {
     tokenizer.define({
       initiator: '',
@@ -260,13 +274,15 @@ export namespace Tokenizer {
       },
     })
 
-    tokenizer.define({
-      initiator: '$(',
-      terminator: ')',
-      inherit: '',
-      quoted: false,
-      depend: ['', '"'],
-    })
+    if (defaultConfig.enableInterpolation) {
+      tokenizer.define({
+        initiator: '$(',
+        terminator: ')',
+        inherit: '',
+        quoted: false,
+        depend: ['', '"'],
+      })
+    }
 
     tokenizer.define({
       initiator: '\\',
@@ -315,74 +331,105 @@ export namespace Tokenizer {
       },
     })
 
-    tokenizer.define({
-      initiator: `$'`,
-      terminator: `'`,
-      depend: '',
-      parse(source: string) {
-        const argv = tokenizer.parse(source, `'`, '', `$'`)
-        return {
-          inline: true,
-          ...argv,
-        }
-      },
-    })
-
-    tokenizer.define({
-      initiator: '\\',
-      terminator: '',
-      depend: `$'`,
-      parse(source: string) {
-        if (!source.length) {
+    if (defaultConfig.enableANSICQuoting) {
+      tokenizer.define({
+        initiator: `$'`,
+        terminator: `'`,
+        depend: '',
+        parse(source: string) {
+          const argv = tokenizer.parse(source, `'`, '', `$'`)
           return {
-            error: 'No character follows backslash',
-            rest: source,
+            inline: true,
+            ...argv,
           }
-        }
-        let content: string
+        },
+      })
 
-        switch (source[0]) {
-          case 'n': content = '\n'; break
-          case 't': content = '\t'; break
-          case 'r': content = '\r'; break
-          case '\\': content = '\\'; break
-          case '\'': content = '\''; break
-          case '"': content = '"'; break
-          default:
-            if (/[0-7]/.test(source[0])) {
-              const match = /^[0-7]{1,3}/.exec(source)!
-              content = String.fromCharCode(parseInt(match[0], 8))
-              source = source.slice(match[0].length - 1)
-            } else if (source[0] === 'x') {
-              const match = /^x[0-9A-Fa-f]{1,2}/.exec(source)!
-              content = String.fromCharCode(parseInt(match[0].slice(1), 16))
-              source = source.slice(match[0].length - 1)
-            } else if (source[0] === 'u') {
-              const match = /^u[0-9A-Fa-f]{4}/.exec(source)!
-              content = String.fromCharCode(parseInt(match[0].slice(1), 16))
-              source = source.slice(match[0].length - 1)
-            } else if (source[0] === 'U') {
-              const match = /^U[0-9A-Fa-f]{8}/.exec(source)!
-              const codePoint = parseInt(match[0].slice(1), 16)
-              content = String.fromCodePoint(codePoint)
-              source = source.slice(match[0].length - 1)
+      tokenizer.define({
+        initiator: '\\',
+        terminator: '',
+        depend: `$'`,
+        parse(source: string) {
+          if (!source.length) {
+            return {
+              error: 'No character follows backslash',
+              rest: source,
             }
-        }
-        if (content) {
-          return {
-            tokens: [{ content, inters: [], quoted: false, terminator: '' }],
-            rest: source.slice(1),
-            inline: true,
           }
-        } else {
-          return {
-            tokens: [{ content: '\\', inters: [], quoted: false, terminator: '' }],
-            rest: source,
-            inline: true,
+          let content: string
+
+          switch (source[0]) {
+            case 'a': content = '\x07'; break
+            case 'b': content = '\b'; break
+            case 'e':
+            case 'E': content = '\x1B'; break
+            case 'f': content = '\f'; break
+            case 'n': content = '\n'; break
+            case 'r': content = '\r'; break
+            case 't': content = '\t'; break
+            case 'v': content = '\v'; break
+            case '\\': content = '\\'; break
+            case '\'': content = '\''; break
+            case '"': content = '"'; break
+            case '?': content = '?'; break
+            case 'x':
+              if (source.length >= 2) {
+                const match = /^x[0-9A-Fa-f]{1,2}/.exec(source)!
+                content = String.fromCharCode(parseInt(match[0].slice(1), 16))
+                source = source.slice(match[0].length - 1)
+              }
+              break
+            case 'u':
+              if (source.length >= 5) {
+                const match = /^u[0-9A-Fa-f]{4}/.exec(source)!
+                content = String.fromCharCode(parseInt(match[0].slice(1), 16))
+                source = source.slice(match[0].length - 1)
+              }
+              break
+            case 'U':
+              if (source.length >= 9) {
+                const match = /^U[0-9A-Fa-f]{8}/.exec(source)!
+                const codePoint = parseInt(match[0].slice(1), 16)
+                content = String.fromCodePoint(codePoint)
+                source = source.slice(match[0].length - 1)
+              }
+              break
+            case 'c':
+              if (source.length >= 2) {
+                const charCode = source.charCodeAt(1)
+                if ((charCode >= 64 && charCode <= 95) || (charCode >= 96 && charCode <= 127)) {
+                  content = String.fromCharCode(charCode % 32)
+                  source = source.slice(1)
+                } else {
+                  content = 'c'
+                }
+              } else {
+                content = 'c'
+              }
+              break
+            default:
+              if (/[0-7]/.test(source[0])) {
+                const match = /^[0-7]{1,3}/.exec(source)!
+                content = String.fromCharCode(parseInt(match[0], 8))
+                source = source.slice(match[0].length - 1)
+              }
           }
-        }
-      },
-    })
+          if (content) {
+            return {
+              tokens: [{ content, inters: [], quoted: false, terminator: '' }],
+              rest: source.slice(1),
+              inline: true,
+            }
+          } else {
+            return {
+              tokens: [{ content: '\\', inters: [], quoted: false, terminator: '' }],
+              rest: source,
+              inline: true,
+            }
+          }
+        },
+      })
+    }
   }
 }
 
@@ -392,10 +439,11 @@ export function apply(ctx: Context, config: Config) {
       parse: Argv.parse,
       stringify: Argv.stringify,
       Tokenizer: Argv.Tokenizer,
-      defaultTokenizer: new Argv.Tokenizer(),
+      defaultTokenizer: Argv.defaultTokenizer,
     } as any
 
     const tokenizer = new Tokenizer()
+    Tokenizer.defaultConfig = config
     Tokenizer.setupDefaultTokenizer(tokenizer)
 
     Argv.parse = function parse(source: string, terminator = '', delimiter = /\s+/, contentInitiator = '') {
