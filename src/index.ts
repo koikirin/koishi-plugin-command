@@ -12,7 +12,7 @@ declare module 'koishi' {
   }
 
   interface Argv {
-    inline?: boolean
+    inline?: true | false | 'content' | 'raw'
   }
 
   namespace Argv {
@@ -39,7 +39,7 @@ let oldArgv: typeof Argv & {
 const whitespace = Argv.whitespace
 
 export class Tokenizer {
-  subcontexts: Dict<Tokenizer.Context> = Object.create(null)
+  contexts: Dict<Tokenizer.Context> = Object.create(null)
   parsers: Tokenizer.Parser[] = []
 
   setDefaultTokenizer(tokenizer: Tokenizer) {
@@ -55,11 +55,11 @@ export class Tokenizer {
       pattern.depend = [pattern.depend]
     }
 
-    const c = this.subcontexts[pattern.initiator]
+    const c = this.contexts[pattern.initiator]
     if (c && (c.terminator !== pattern.terminator || c.inherit !== pattern.inherit)) {
       throw new Error(`Context for initiator "${pattern.initiator}" already exists.`)
     } else {
-      this.subcontexts[pattern.initiator] = {
+      this.contexts[pattern.initiator] = {
         terminator: pattern.terminator,
         inherit: pattern.inherit,
         quoted: pattern.quoted ?? true,
@@ -84,8 +84,8 @@ export class Tokenizer {
 
   lookup(initiator: string): Tokenizer.Parser[] {
     const inherits = [initiator]
-    while (!isNullable(this.subcontexts[initiator]?.inherit)) {
-      initiator = this.subcontexts[initiator].inherit
+    while (!isNullable(this.contexts[initiator]?.inherit)) {
+      initiator = this.contexts[initiator].inherit
       inherits.push(initiator)
     }
     return this.parsers.filter(p => inherits.includes(p.depend))
@@ -131,7 +131,7 @@ export class Tokenizer {
 
   parseToken(source: string, stopReg = '$', contextInitiator: string = ''): Token {
     const parent = { inters: [] } as Token
-    const context = this.subcontexts[contextInitiator]
+    const context = this.contexts[contextInitiator]
     if (!context) throw new Error(`No content defined for initiator "${contextInitiator}"`)
     let content = '', raw = ''
     if (context.terminator) {
@@ -150,7 +150,7 @@ export class Tokenizer {
       if (parser && capture[0] !== context.terminator) {
         raw += source.slice(0, capture.index)
         source = source.slice(capture.index + capture[0].length)
-        const terminator = this.subcontexts[parser.initiator].terminator
+        const terminator = this.contexts[parser.initiator].terminator
         const argv = parser.parse?.(source) || this.parse(source, terminator, /\s+/, parser.initiator)
         source = argv.rest
         if (argv.inline) {
@@ -160,7 +160,13 @@ export class Tokenizer {
             pos: inter.pos + content.length,
           })))
           content += token.content
-          raw += parser.initiator + token.raw + (token.terminator === terminator ? terminator : '')
+          if (argv.inline === 'content') {
+            raw += token.content
+          } else if (argv.inline === 'raw') {
+            raw += token.raw
+          } else {
+            raw += parser.initiator + token.raw + (token.terminator === terminator ? terminator : '')
+          }
         } else if (argv.tokens?.length) {
           parent.inters.push({ ...argv, pos: content.length, initiator: parser.initiator })
         }
@@ -175,11 +181,13 @@ export class Tokenizer {
     }
   }
 
-  parse(source: string, terminator: string | RegExp = '', delimiter: string | RegExp = /\s+/, content: string = ''): Argv {
+  parse(source: string, terminator: string | RegExp = '', delimiter: string | RegExp = /\s+/, context: string = ''): Argv {
     const tokens: Token[] = []
-    source = h.parse(source).map((el) => {
-      return el.type === 'text' ? el.toString() : whitespace.escape(el.toString())
-    }).join('')
+    if (!context) {
+      source = h.parse(source).map((el) => {
+        return el.type === 'text' ? el.toString() : `$"${el.toString().replace(/(\$|`|"|\\)/g, '\\$1')}"`
+      }).join('')
+    }
     let rest = source, term = ''
     const terminatorReg = typeof terminator === 'string' ? `[${escapeRegExp(terminator)}]` : terminator.source
     const terminatorRegExp = new RegExp(`^(${terminatorReg})`)
@@ -188,7 +196,7 @@ export class Tokenizer {
 
     // eslint-disable-next-line no-unmodified-loop-condition
     while (rest && !(terminator && (terminatorRegExp.exec(rest) || terminatorRegExp.exec(term)))) {
-      const token = this.parseToken(rest, stopReg, content)
+      const token = this.parseToken(rest, stopReg, context)
       rest = token.rest
       term = token.terminator
       delete token.rest
@@ -203,7 +211,6 @@ export class Tokenizer {
       rest = rest.slice(capture[0].length)
     }
 
-    rest = whitespace.unescape(rest)
     return { tokens: tokens.map(token => this.wrapToken(token)), rest }
   }
 
@@ -246,6 +253,47 @@ export namespace Tokenizer {
       initiator: '',
       terminator: '',
       quoted: false,
+    })
+
+    // escape elements
+    tokenizer.define({
+      initiator: `$"`,
+      terminator: `"`,
+      depend: '',
+      parse(source: string) {
+        const argv = tokenizer.parse(source, `"`, '', `$"`)
+        return {
+          inline: 'content',
+          ...argv,
+        }
+      },
+    })
+
+    tokenizer.define({
+      initiator: '\\',
+      terminator: '',
+      depend: '$"',
+      parse(source: string) {
+        const allowedCharacters = `$\`"\\`
+        if (!source.length) {
+          return {
+            error: 'No character follows backslash',
+            rest: source,
+          }
+        } else if (allowedCharacters.includes(source[0])) {
+          return {
+            tokens: [{ content: source[0], inters: [], quoted: false, terminator: '' }],
+            rest: source.slice(1),
+            inline: true,
+          }
+        } else {
+          return {
+            tokens: [{ content: `\\`, inters: [], quoted: false, terminator: '' }],
+            rest: source,
+            inline: true,
+          }
+        }
+      },
     })
 
     tokenizer.define({

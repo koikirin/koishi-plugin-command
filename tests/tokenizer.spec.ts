@@ -88,6 +88,7 @@ describe('command', () => {
     test(`$(1)`, '')
     test(`$( 1 2 3   )`, '')
     test(`" a $(123) b $(456) c "`, `" a  b  c "`)
+    test(`a <at id="114" name="5\\14"/>`)
     cmd.dispose()
   })
 
