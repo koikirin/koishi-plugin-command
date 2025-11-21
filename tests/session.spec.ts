@@ -1,4 +1,4 @@
-import { App } from 'koishi'
+import { App, h, Universal } from 'koishi'
 import mock from '@koishijs/plugin-mock'
 import * as _command from '../src'
 
@@ -33,5 +33,15 @@ describe('session', () => {
   it('interpolate 2', async () => {
     await client.shouldReply('echo $(echo $(echo 0))', '0')
     await client.shouldReply('echo 1 $(echo $(echo 0))2', '1 02')
+  })
+
+  it('element', async () => {
+    const fragment = [
+      h.text('test'),
+      h.at('test', { name: 'test' }),
+      h.image('http://example.com/a.png'),
+    ]
+    const fstr = fragment.map(el => el.toString()).join('')
+    await client.shouldReply(`echo ${fstr}`, fstr)
   })
 })

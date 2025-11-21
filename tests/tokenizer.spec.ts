@@ -70,7 +70,7 @@ describe('command', () => {
   it('stringify', async () => {
     expect(Argv.stringify(Argv.parse(`"x" $(echo 1)`).tokens![1].inters[0])).to.equal(`echo 1`)
 
-    let test = (x: string, y?: string) => expect(Argv.stringify(Argv.parse(x))).to.deep.equal(y ?? x)
+    const test = (x: string, y?: string) => expect(Argv.stringify(Argv.parse(x))).to.deep.equal(y ?? x)
     test(`x y z`)
     test(`x "yy" 'zz'`)
     test(`x "yy" 'zz' $(aa)`, `x "yy" 'zz' `)
@@ -80,15 +80,14 @@ describe('command', () => {
   })
 
   it('identity', async () => {
-    let cmd = app.command('h <content:text>')
-    let test = (x: string, y?: string) => expect(cmd.parse(x).args).to.deep.equal([y ?? x])
+    const cmd = app.command('h <content:text>')
+    const test = (x: string, y?: string) => expect(cmd.parse(x).args).to.deep.equal([y ?? x])
     test(`x y z`)
     test(`x "yy" 'zz'`)
     test(`x "yy" 'zz' $(aa)`, `x "yy" 'zz' `)
     test(`$(1)`, '')
     test(`$( 1 2 3   )`, '')
     test(`" a $(123) b $(456) c "`, `" a  b  c "`)
-    test(`a <at id="114" name="5\\14"/>`)
     cmd.dispose()
   })
 
@@ -96,6 +95,8 @@ describe('command', () => {
     const identity = (source: string) => Argv.stringify(Argv.parse(source))
     expect(identity('a "1')).to.deep.equal('a "1')
     expect(identity(`"aa'55`)).to.deep.equal(`"aa'55`)
+    expect(identity('</aa>')).to.deep.equal('</aa>')
+    expect(identity('<aa>xx<')).to.deep.equal('<aa>xx<')
   })
 
   it('trim', async () => {
@@ -104,9 +105,30 @@ describe('command', () => {
     expect(parseInter(' " $( a ) " ')).to.deep.equal([['  '], ['a']])
   })
 
+  it('element', async () => {
+    const identity = (source: string) => Argv.stringify(Argv.parse(source))
+    const cmd = app.command('h <content:el>')
+    const test = (x: string, y?: string) => {
+      expect(identity(x)).to.equal(y ?? x)
+      expect(cmd.parse(x).args).to.deep.equal([h.parse(y ?? x)])
+    }
+    test(`<div> test </div>`)
+    test(`<div class="a b" id='test'> test </div>`)
+    test(`<div> te' "st </div>`)
+    test(`<div> test $(x)<img src="</aa> <bb>"> </ img > </div>`)
+    test(`a <at id="114" name="5\\14"/>`)
+    cmd.dispose()
+  })
+
   it('performance', async () => {
     for (let i = 0; i < 10000; i++) {
       Argv.parse(`command arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10`)
+    }
+  })
+
+  it('performance2', async () => {
+    for (let i = 0; i < 10000; i++) {
+      Argv.parse(`command "arg1" 'arg2' arg3 \\$arg4 $(echo arg5) arg6`)
     }
   })
 })
