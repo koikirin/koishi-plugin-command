@@ -1,7 +1,7 @@
 {
   "name": "@hieuzest/koishi-plugin-command",
   "description": "Better command tokenizer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "main": "lib/index.cjs",
   "module": "lib/index.mjs",
@@ -30,17 +30,17 @@
     "koishi": "^4.18.7"
   },
   "devDependencies": {
+    "@hieuzest/koishi-buildtools": "^1.0.3",
+    "@koishijs/plugin-mock": "^2.6.6",
     "@types/chai": "^5.2.3",
     "@types/chai-as-promised": "^8.0.2",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^24.10.0",
     "chai": "^6.2.0",
     "chai-as-promised": "^8.0.2",
     "esbuild": "^0.25.12",
     "esbuild-register": "^3.6.0",
     "koishi": "^4.18.7",
     "mocha": "^11.7.4",
-    "typescript": "^5.9.3",
     "yml-register": "^1.2.5"
   }
 }
