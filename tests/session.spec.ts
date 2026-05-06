@@ -8,7 +8,7 @@ describe('session', () => {
   const client = app.mock.client('456')
 
   app.plugin(_command, {
-    enablePiping: true,
+    enablePipeline: true,
   })
 
   app.command('echo [content:text]').action((_, text) => text)

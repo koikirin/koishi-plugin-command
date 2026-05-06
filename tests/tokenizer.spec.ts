@@ -7,7 +7,7 @@ describe('command', () => {
 
   before(() => {
     app.plugin(_command, {
-      enablePiping: true,
+      enablePipeline: true,
     })
   })
   after(() => app.stop())

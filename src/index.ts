@@ -25,7 +25,7 @@ export interface Config {
   enableInterpolation?: boolean
   enableBackslashEscaping?: boolean
   enableANSICQuoting?: boolean
-  enablePiping?: boolean
+  enablePipeline?: boolean
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -555,7 +555,7 @@ export namespace Tokenizer {
       })
     }
 
-    if (defaultConfig.enablePiping) {
+    if (defaultConfig.enablePipeline) {
       tokenizer.define({
         initiator: '|',
         terminator: '',
