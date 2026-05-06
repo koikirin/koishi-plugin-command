@@ -12,7 +12,7 @@ declare module 'koishi' {
   }
 
   interface Argv {
-    inline?: true | false | 'plain' | 'strip'
+    inline?: true | false | 'plain' | 'strip' | 'break'
   }
 
   namespace Argv {
@@ -21,10 +21,11 @@ declare module 'koishi' {
 }
 
 export interface Config {
-  provideTokenizerService: boolean
-  enableInterpolation: boolean
-  enableBackslashEscaping: boolean
-  enableANSICQuoting: boolean
+  provideTokenizerService?: boolean
+  enableInterpolation?: boolean
+  enableBackslashEscaping?: boolean
+  enableANSICQuoting?: boolean
+  enablePiping?: boolean
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -32,6 +33,7 @@ export const Config: Schema<Config> = Schema.object({
   enableInterpolation: Schema.boolean().default(true),
   enableBackslashEscaping: Schema.boolean().default(true),
   enableANSICQuoting: Schema.boolean().default(true),
+  enablePiping: Schema.boolean().default(false),
 })
 
 let oldArgv: typeof Argv & {
@@ -131,7 +133,7 @@ export class Tokenizer {
     })
   }
 
-  parseToken(source: string, stopReg = '$', context: string = ''): Token {
+  parseToken(source: string, stopReg = '$', context: string = '', tokens?: Token[]): Token {
     const parent = { inters: [] } as Token
     const ctx = this.contexts[context]
     let content = '', raw = ''
@@ -151,9 +153,17 @@ export class Tokenizer {
       if (parser && capture[0] !== ctx.terminator) {
         raw += source.slice(0, capture.index)
         source = source.slice(capture.index + capture[0].length)
-        const argv = parser.parse?.(source) || this.parse(source, this.contexts[capture[0]].terminator, /\s+/, capture[0])
+        const argv = parser.parse?.(source, tokens, ctx?.terminator) || this.parse(source, this.contexts[capture[0]].terminator, /\s+/, capture[0])
         source = argv.rest
         if (argv.inline) {
+          if (argv.inline === 'break') {
+            // pipe already manipulated tokens directly, break out of parseToken
+            parent.rest = argv.rest
+            parent.terminator = ''
+            parent.content = content
+            parent.raw = raw
+            return parent
+          }
           const token = this.inline(argv)
           parent.inters.push(...token.inters.map(inter => ({
             ...inter,
@@ -204,7 +214,7 @@ export class Tokenizer {
 
     // eslint-disable-next-line no-unmodified-loop-condition
     while (rest && !(terminator && (terminatorRegExp.exec(rest) || terminatorRegExp.exec(term)))) {
-      const token = this.parseToken(rest, stopReg, context)
+      const token = this.parseToken(rest, stopReg, context, tokens)
       rest = token.rest
       term = token.terminator
       delete token.rest
@@ -214,19 +224,37 @@ export class Tokenizer {
       }
     }
 
+    let stopped = ''
     if (terminator && !terminatorRegExp.exec(term) && terminatorRegExp.exec(rest)) {
       const capture = terminatorRegExp.exec(rest)
+      stopped = capture[0]
       rest = rest.slice(capture[0].length)
+    } else if (terminator && terminatorRegExp.exec(term)) {
+      stopped = terminatorRegExp.exec(term)[0]
     }
 
-    return { tokens: tokens.map(token => this.wrapToken(token)), rest }
+    return { tokens: tokens.map(token => this.wrapToken(token)), rest, terminator: stopped }
   }
 
-  stringify(argv: Argv) {
+  stringify(argv: Argv, inters: boolean = false) {
     let terminator = ''
     const output = argv.tokens.reduce((prev, token) => {
       terminator = token.terminator ?? ''
-      return prev + (token.raw ?? token.content) + (token.terminator ?? '')
+      const raw = token.raw ?? token.content
+      let text = raw
+      if (inters && token.inters?.length) {
+        const { content } = token
+        let result = ''
+        let lastPos = 0
+        for (const inter of token.inters) {
+          result += content.slice(lastPos, inter.pos)
+          result += inter.initiator + this.stringify({ tokens: inter.tokens } as Argv, true)
+          lastPos = inter.pos
+        }
+        result += content.slice(lastPos)
+        text = raw.slice(0, raw.length - content.length) + result
+      }
+      return prev + text + terminator
     }, '')
     return argv.initiator ? output.slice(0, -terminator.length) : output
   }
@@ -243,7 +271,7 @@ export namespace Tokenizer {
   export interface Parser {
     context: string
     depend?: string
-    parse?: (source: string) => Argv
+    parse?: (source: string, tokens?: Token[], terminator?: string) => Argv
 
     // for performance
     initiator: string
@@ -257,7 +285,7 @@ export namespace Tokenizer {
     inherit?: string
     quoted?: boolean
     depend?: string | string[]
-    parse?: (source: string) => Argv
+    parse?: (source: string, tokens?: Token[], terminator?: string) => Argv
   }
 
   export let defaultConfig: Config
@@ -509,6 +537,48 @@ export namespace Tokenizer {
         },
       })
     }
+
+    if (defaultConfig.enablePiping) {
+      tokenizer.define({
+        initiator: '|',
+        terminator: '',
+        inherit: '',
+        quoted: false,
+        depend: '',
+        parse(source: string, tokens?: Token[], terminator?: string) {
+          const prevTokens = tokens ? [...tokens] : []
+          const term = terminator ? new RegExp(`${escapeRegExp(terminator)}|\\|`) : /\|/
+          const argv = tokenizer.parse(source, term)
+
+          if (prevTokens.length) {
+            prevTokens[prevTokens.length - 1].terminator = ')'
+            tokens.splice(0, tokens.length)
+            tokens.push(...argv.tokens)
+            if (tokens.length) {
+              tokens[tokens.length - 1].terminator = ' '
+            }
+            tokens.push({
+              content: '',
+              inters: [{ tokens: prevTokens, initiator: '$(', pos: 0 }],
+              quoted: false,
+              terminator: argv.terminator === '|' ? '' : argv.terminator || '',
+            })
+          }
+
+          // reconstruct rest: put back | for next pipe trigger
+          let rest = argv.rest
+          if (argv.terminator === '|') {
+            rest = '|' + rest
+          }
+
+          return {
+            inline: 'break',
+            tokens: [],
+            rest,
+          }
+        },
+      })
+    }
   }
 }
 
@@ -529,8 +599,8 @@ export function apply(ctx: Context, config: Config) {
       return tokenizer.parse(source, terminator, delimiter, contentInitiator)
     }
 
-    Argv.stringify = function stringify(argv: Argv) {
-      return tokenizer.stringify(argv)
+    Argv.stringify = function stringify(argv: Argv, inters?: boolean) {
+      return tokenizer.stringify(argv, inters)
     }
 
     Argv.Tokenizer = Tokenizer as any

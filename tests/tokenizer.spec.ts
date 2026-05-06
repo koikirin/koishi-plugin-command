@@ -5,7 +5,12 @@ import * as _command from '../src'
 describe('command', () => {
   const app = new App()
 
-  app.plugin(_command)
+  before(() => {
+    app.plugin(_command, {
+      enablePiping: true,
+    })
+  })
+  after(() => app.stop())
 
   const parse = (source: string, terminator = '') => Argv.parse(source, terminator).tokens?.map(token => token.content)
 
@@ -22,6 +27,10 @@ describe('command', () => {
     collect(Argv.parse(source, terminator))
     return tokens
   }
+
+  const identity = (source: string) => Argv.stringify(Argv.parse(source))
+  // @ts-expect-error
+  const identityInter = (source: string) => Argv.stringify(Argv.parse(source), true)
 
   const applyInter = (argv: Argv) => '[' + argv.tokens!.map((token) => {
     let content = token.content
@@ -92,7 +101,6 @@ describe('command', () => {
   })
 
   it('unclosed', async () => {
-    const identity = (source: string) => Argv.stringify(Argv.parse(source))
     expect(identity('a "1')).to.deep.equal('a "1')
     expect(identity(`"aa'55`)).to.deep.equal(`"aa'55`)
     expect(identity('</aa>')).to.deep.equal('</aa>')
@@ -106,7 +114,6 @@ describe('command', () => {
   })
 
   it('element', async () => {
-    const identity = (source: string) => Argv.stringify(Argv.parse(source))
     const cmd = app.command('h <content:el>')
     const test = (x: string, y?: string) => {
       expect(identity(x)).to.equal(y ?? x)
@@ -118,6 +125,17 @@ describe('command', () => {
     test(`<div> test $(x)<img src="</aa> <bb>"> </ img > </div>`)
     test(`a <at id="114" name="5\\14"/>`)
     cmd.dispose()
+  })
+
+  it('pipe', async () => {
+    expect(identityInter('a 1 | b 2')).to.equal('b 2 $(a 1)')
+    expect(identityInter('b 2 $(a 1)')).to.equal('b 2 $(a 1)')
+    expect(identityInter('sum 1 2 | sum 3 | echo')).to.equal('echo $(sum 3 $(sum 1 2))')
+    expect(identityInter('echo $(echo 1 | sum 2)')).to.equal('echo $(sum 2 $(echo 1))')
+    expect(identityInter('sum 1 2 | sum $(echo 3)')).to.equal('sum $(echo 3) $(sum 1 2)')
+    expect(identityInter('echo $(sum 1 2 | sum $(echo 3))')).to.equal('echo $(sum $(echo 3) $(sum 1 2))')
+    expect(identityInter('echo "a b" | sum 1')).to.equal('sum 1 $(echo "a b")')
+    expect(identityInter('echo \\n | sum 1')).to.equal('sum 1 $(echo \\n)')
   })
 
   it('performance', async () => {
