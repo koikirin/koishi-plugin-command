@@ -43,6 +43,8 @@ let oldArgv: typeof Argv & {
 export class Tokenizer {
   contexts: Dict<Tokenizer.Context> = Object.create(null)
   parsers: Tokenizer.Parser[] = []
+  private lookupCache: Dict<Tokenizer.Parser[]> = Object.create(null)
+  private stopRegCache: Dict<string> = Object.create(null)
 
   setDefaultTokenizer(tokenizer: Tokenizer) {
     const oldTokenizer = Argv.defaultTokenizer
@@ -84,15 +86,36 @@ export class Tokenizer {
         })
       })
     }
+    this.lookupCache = Object.create(null)
+    this.stopRegCache = Object.create(null)
   }
 
   lookup(context: string): (Tokenizer.Parser)[] {
+    if (this.lookupCache[context]) return this.lookupCache[context]
     const inherits = [context]
-    while (!isNullable(this.contexts[context]?.inherit)) {
-      context = this.contexts[context].inherit
-      inherits.push(context)
+    let ctx = context
+    while (!isNullable(this.contexts[ctx]?.inherit)) {
+      ctx = this.contexts[ctx].inherit
+      inherits.push(ctx)
     }
-    return this.parsers.filter(p => inherits.includes(p.depend))
+    const result = this.parsers.filter(p => inherits.includes(p.depend))
+    this.lookupCache[context] = result
+    return result
+  }
+
+  getStopRegSuffix(context: string): string {
+    if (context in this.stopRegCache) return this.stopRegCache[context]
+    let suffix = ''
+    const ctx = this.contexts[context]
+    if (ctx?.terminator) {
+      suffix += `|${escapeRegExp(ctx.terminator)}`
+    }
+    const parsers = this.lookup(context)
+    if (parsers.length) {
+      suffix += `|${parsers.map(({ initiatorReg }) => initiatorReg).join('|')}`
+    }
+    this.stopRegCache[context] = suffix
+    return suffix
   }
 
   interpolate(initiator: string, terminator: string, parse?: (source: string) => Argv) {
@@ -133,18 +156,11 @@ export class Tokenizer {
     })
   }
 
-  parseToken(source: string, stopReg = '$', context: string = '', tokens?: Token[]): Token {
+  parseToken(source: string, regExp: RegExp, context: string = '', tokens?: Token[]): Token {
     const parent = { inters: [] } as Token
     const ctx = this.contexts[context]
     let content = '', raw = ''
-    if (ctx?.terminator) {
-      stopReg += `|${escapeRegExp(ctx.terminator)}`
-    }
     const parsers = this.lookup(context)
-    if (parsers.length) {
-      stopReg += `|${Object.values(parsers).map(({ initiatorReg }) => initiatorReg).join('|')}`
-    }
-    const regExp = new RegExp(stopReg)
     while (true) {
       const capture = regExp.exec(source)
       content += source.slice(0, capture.index)
@@ -211,10 +227,11 @@ export class Tokenizer {
     const terminatorRegExp = new RegExp(`^(${terminatorReg})`)
     const delimiterReg = typeof delimiter === 'string' ? `[${escapeRegExp(delimiter)}]` : delimiter.source
     const stopReg = `${delimiter ? `${delimiterReg}|` : ''}${terminator ? `${terminatorReg}|` : ''}$`
+    const stopRegExp = new RegExp(stopReg + this.getStopRegSuffix(context))
 
     // eslint-disable-next-line no-unmodified-loop-condition
     while (rest && !(terminator && (terminatorRegExp.exec(rest) || terminatorRegExp.exec(term)))) {
-      const token = this.parseToken(rest, stopReg, context, tokens)
+      const token = this.parseToken(rest, stopRegExp, context, tokens)
       rest = token.rest
       term = token.terminator
       delete token.rest
