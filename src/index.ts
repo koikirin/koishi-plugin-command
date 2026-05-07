@@ -33,7 +33,7 @@ export const Config: Schema<Config> = Schema.object({
   enableInterpolation: Schema.boolean().default(true),
   enableBackslashEscaping: Schema.boolean().default(true),
   enableANSICQuoting: Schema.boolean().default(true),
-  enablePiping: Schema.boolean().default(false),
+  enablePipeline: Schema.boolean().default(false),
 })
 
 let oldArgv: typeof Argv & {
