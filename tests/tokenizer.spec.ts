@@ -52,6 +52,10 @@ describe('command', () => {
 
     testApply(`a b$(xx $(yy d))c`)
     testApply(`a b$(x y z)c`)
+
+    expect(identityInter('$()')).to.equal('$()')
+    expect(identityInter('a $(  ) b')).to.equal('a $() b')
+    expect(identityInter('$(echo $(echo 1))')).to.equal('$(echo $(echo 1))')
   })
 
   it('quote', async () => {
@@ -112,14 +116,17 @@ describe('command', () => {
   it('empty quoted', async () => {
     expect(parse('""')).to.deep.equal([''])
     expect(parse("''")).to.deep.equal([''])
+    expect(parse("$''")).to.deep.equal([''])
     expect(parse('echo ""')).to.deep.equal(['echo', ''])
     expect(parse('echo "" ""')).to.deep.equal(['echo', '', ''])
     expect(parse("echo '' ''")).to.deep.equal(['echo', '', ''])
+    expect(parse("echo $''")).to.deep.equal(['echo', ''])
     expect(parse('"" echo ""')).to.deep.equal(['', 'echo', ''])
     expect(parse('"a" "" "b"')).to.deep.equal(['a', '', 'b'])
 
     expect(identity('""')).to.equal('""')
     expect(identity("''")).to.equal("''")
+    expect(identity("$''")).to.equal("$''")
     expect(identity('echo ""')).to.equal('echo ""')
     expect(identity('"" ""')).to.equal('"" ""')
   })
@@ -155,6 +162,15 @@ describe('command', () => {
     expect(identity('<aa>xx<')).to.deep.equal('<aa>xx<')
   })
 
+  it('interpolate identity', async () => {
+    const test = (x: string, y?: string) => expect(identityInter(x)).to.equal(y ?? x)
+    test(`b $(a ) `)
+    test(`b $(a)`)
+    test(`b $()`)
+    test(`b $(a`)
+    test(`b $(`)
+  })
+
   it('trim', async () => {
     expect(parse(' a ')).to.deep.equal(['a'])
     expect(parseInter(' $( a ) ')).to.deep.equal([[''], ['a']])
@@ -176,14 +192,15 @@ describe('command', () => {
   })
 
   it('pipe', async () => {
-    expect(identityInter('a 1 | b 2')).to.equal('b 2 $(a 1)')
+    expect(identityInter('a 1| b 2')).to.equal('b 2 $(a 1)')
+    expect(identityInter('a 1 | b 2')).to.equal('b 2 $(a 1 )')
     expect(identityInter('b 2 $(a 1)')).to.equal('b 2 $(a 1)')
-    expect(identityInter('sum 1 2 | sum 3 | echo')).to.equal('echo $(sum 3 $(sum 1 2))')
-    expect(identityInter('echo $(echo 1 | sum 2)')).to.equal('echo $(sum 2 $(echo 1))')
-    expect(identityInter('sum 1 2 | sum $(echo 3)')).to.equal('sum $(echo 3) $(sum 1 2)')
-    expect(identityInter('echo $(sum 1 2 | sum $(echo 3))')).to.equal('echo $(sum $(echo 3) $(sum 1 2))')
-    expect(identityInter('echo "a b" | sum 1')).to.equal('sum 1 $(echo "a b")')
-    expect(identityInter('echo \\n | sum 1')).to.equal('sum 1 $(echo \\n)')
+    expect(identityInter('sum 1 2 | sum 3 | echo')).to.equal('echo $(sum 3 $(sum 1 2 ))')
+    expect(identityInter('echo $(echo 1 | sum 2)')).to.equal('echo $(sum 2 $(echo 1 ))')
+    expect(identityInter('sum 1 2 | sum $(echo 3)')).to.equal('sum $(echo 3) $(sum 1 2 )')
+    expect(identityInter('echo $(sum 1 2 | sum $(echo 3))')).to.equal('echo $(sum $(echo 3) $(sum 1 2 ))')
+    expect(identityInter('echo "a b" | sum 1')).to.equal('sum 1 $(echo "a b" )')
+    expect(identityInter('echo \\n | sum 1')).to.equal('sum 1 $(echo \\n )')
   })
 
   it('performance', async () => {

@@ -174,15 +174,15 @@ export class Tokenizer {
       if (parser && capture[0] !== ctx.terminator) {
         raw += source.slice(0, capture.index)
         source = source.slice(capture.index + capture[0].length)
-        const argv = parser.parse?.(source, tokens, ctx?.terminator) || this.parse(source, this.contexts[capture[0]].terminator, /\s+/, capture[0])
+        const pstate: Tokenizer.ParseState = { tokens, content: raw, terminator: ctx?.terminator }
+        const argv = parser.parse?.(source, pstate) || this.parse(source, this.contexts[capture[0]].terminator, /\s+/, capture[0])
         source = argv.rest
         if (argv.inline) {
           if (argv.inline === 'break') {
-            // pipe already manipulated tokens directly, break out of parseToken
             parent.rest = argv.rest
             parent.terminator = ''
-            parent.content = content
-            parent.raw = raw
+            parent.content = ''
+            parent.raw = ''
             return parent
           }
           const token = this.inline(argv)
@@ -212,7 +212,7 @@ export class Tokenizer {
             content += token.content
             raw += capture[0] + token.raw + token.terminator
           }
-        } else if (argv.tokens?.length) {
+        } else {
           parent.inters.push({ ...argv, pos: content.length, initiator: capture[0] })
         }
       } else {
@@ -271,7 +271,12 @@ export class Tokenizer {
         let lastPos = 0
         for (const inter of token.inters) {
           result += content.slice(lastPos, inter.pos)
-          result += inter.initiator + this.stringify({ tokens: inter.tokens } as Argv, true)
+          let interText = this.stringify({ tokens: inter.tokens } as Argv, true)
+          const lastTerminator = inter.tokens[inter.tokens.length - 1]?.terminator
+          if (inter.terminator && lastTerminator !== inter.terminator) {
+            interText += inter.terminator
+          }
+          result += inter.initiator + interText
           lastPos = inter.pos
         }
         result += content.slice(lastPos)
@@ -284,6 +289,13 @@ export class Tokenizer {
 }
 
 export namespace Tokenizer {
+  export interface ParseState {
+    terminator?: string | RegExp
+    delimiter?: string | RegExp
+    tokens?: Token[]
+    content?: string
+  }
+
   export interface Context {
     initiator: string
     terminator: string
@@ -294,7 +306,7 @@ export namespace Tokenizer {
   export interface Parser {
     context: string
     depend?: string
-    parse?: (source: string, tokens?: Token[], terminator?: string) => Argv
+    parse?: (source: string, state?: ParseState) => Argv
 
     // for performance
     initiator: string
@@ -308,7 +320,7 @@ export namespace Tokenizer {
     inherit?: string
     quoted?: boolean
     depend?: string | string[]
-    parse?: (source: string, tokens?: Token[], terminator?: string) => Argv
+    parse?: (source: string, state?: ParseState) => Argv
   }
 
   export let defaultConfig: Config
@@ -384,8 +396,8 @@ export namespace Tokenizer {
         quoted: defaultConfig.compatibilityQuotedFlags.includes(initiator),
         parse(source: string) {
           const argv = tokenizer.parse(source, terminator, '', initiator)
-          if (!argv.tokens.length && defaultConfig.compatibilityQuotedFlags.includes(initiator)) {
-            argv.tokens = [{ content: '', raw: '', quoted: true, inters: [], terminator }]
+          if (!argv.tokens.length && argv.terminator) {
+            argv.tokens = [{ content: '', raw: '', quoted: true, inters: [], terminator: argv.terminator }]
           }
           return {
             inline: true,
@@ -461,6 +473,9 @@ export namespace Tokenizer {
         depend: '',
         parse(source: string) {
           const argv = tokenizer.parse(source, `'`, '', `$'`)
+          if (!argv.tokens.length && argv.terminator) {
+            argv.tokens = [{ content: '', raw: '', quoted: true, inters: [], terminator: argv.terminator }]
+          }
           return {
             inline: true,
             ...argv,
@@ -568,21 +583,24 @@ export namespace Tokenizer {
         inherit: '',
         quoted: false,
         depend: '',
-        parse(source: string, tokens?: Token[], terminator?: string) {
+        parse(source: string, state?: Tokenizer.ParseState) {
+          const { tokens, content, terminator } = state || {}
           const prevTokens = tokens ? [...tokens] : []
-          const term = terminator ? new RegExp(`${escapeRegExp(terminator)}|\\|`) : /\|/
+          if (content) {
+            prevTokens.push({ content, raw: content, inters: [], quoted: false, terminator: '' })
+          }
+          const term = terminator ? new RegExp(`${escapeRegExp(terminator as string)}|\\|`) : /\|/
           const argv = tokenizer.parse(source, term)
 
           if (prevTokens.length) {
-            prevTokens[prevTokens.length - 1].terminator = ')'
-            tokens.splice(0, tokens.length)
-            tokens.push(...argv.tokens)
-            if (tokens.length) {
+            tokens?.splice(0, tokens.length)
+            tokens?.push(...argv.tokens)
+            if (tokens?.length) {
               tokens[tokens.length - 1].terminator = ' '
             }
-            tokens.push({
+            tokens?.push({
               content: '',
-              inters: [{ tokens: prevTokens, initiator: '$(', pos: 0 }],
+              inters: [{ tokens: prevTokens, initiator: '$(', pos: 0, terminator: ')' }],
               quoted: false,
               terminator: argv.terminator === '|' ? '' : argv.terminator || '',
             })
@@ -610,6 +628,7 @@ export function apply(ctx: Context, config: Config) {
     oldArgv = {
       parse: Argv.parse,
       stringify: Argv.stringify,
+      interpolate: Argv.interpolate,
       Tokenizer: Argv.Tokenizer,
       defaultTokenizer: Argv.defaultTokenizer,
     } as any
@@ -626,6 +645,10 @@ export function apply(ctx: Context, config: Config) {
       return tokenizer.stringify(argv, inters)
     }
 
+    Argv.interpolate = function interpolate(initiator: string, terminator: string, parse?: (source: string) => Argv) {
+      return tokenizer.interpolate(initiator, terminator, parse)
+    }
+
     Argv.Tokenizer = Tokenizer as any
 
     Argv.defaultTokenizer = tokenizer as any
@@ -637,6 +660,7 @@ export function apply(ctx: Context, config: Config) {
     return () => {
       Argv.parse = oldArgv.parse
       Argv.stringify = oldArgv.stringify
+      Argv.interpolate = oldArgv.interpolate
       Argv.Tokenizer = oldArgv.Tokenizer
       Argv.defaultTokenizer = oldArgv.defaultTokenizer
     }

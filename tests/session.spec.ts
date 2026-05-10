@@ -1,4 +1,4 @@
-import { App, h } from 'koishi'
+import { App, Argv, h } from 'koishi'
 import mock from '@koishijs/plugin-mock'
 import * as _command from '../src'
 
@@ -9,6 +9,17 @@ describe('session', () => {
 
   app.plugin(_command, {
     enablePipeline: true,
+  })
+
+  Argv.interpolate('${', '}', (raw) => {
+    const index = raw.indexOf('}')
+    const result = (index >= 0 ? raw.slice(0, index) : '').toUpperCase()
+    return {
+      source: result,
+      command: app.command('echo'),
+      args: [result],
+      rest: raw.slice(result.length + 1),
+    }
   })
 
   app.command('echo [content:text]').action((_, text) => text)
@@ -64,5 +75,9 @@ describe('session', () => {
     await client.shouldReply('echo $(echo 1 | sum 2)', '3')
     await client.shouldReply('echo $(sum 1 2 | sum 4)', '7')
     await client.shouldReply('echo $(sum 1 2 | sum $(echo 3))', '6')
+  })
+
+  it('Argv.interpolate', async () => {
+    await client.shouldReply(`echo $\{abcd}efg`, 'ABCDefg')
   })
 })
