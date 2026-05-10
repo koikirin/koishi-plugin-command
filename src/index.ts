@@ -26,6 +26,8 @@ export interface Config {
   enableBackslashEscaping?: boolean
   enableANSICQuoting?: boolean
   enablePipeline?: boolean
+  compatibilityChineseQuotes?: boolean
+  compatibilityQuotedFlags?: string[]
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -34,6 +36,8 @@ export const Config: Schema<Config> = Schema.object({
   enableBackslashEscaping: Schema.boolean().default(true),
   enableANSICQuoting: Schema.boolean().default(true),
   enablePipeline: Schema.boolean().default(false),
+  compatibilityChineseQuotes: Schema.boolean().default(false),
+  compatibilityQuotedFlags: Schema.array(String).default([`'`, `"`, `“`, `”`, `‘`, `’`]),
 })
 
 let oldArgv: typeof Argv & {
@@ -132,6 +136,7 @@ export class Tokenizer {
     for (const t of argv.tokens) {
       token.content += (token.terminator ?? '') + t.content
       token.raw += (token.terminator ?? '') + (t.raw ?? t.content)
+      token.quoted ||= t.quoted
       const offset = token.content.length
       for (const inter of t.inters) {
         token.inters.push({
@@ -159,7 +164,7 @@ export class Tokenizer {
   parseToken(source: string, regExp: RegExp, context: string = '', tokens?: Token[]): Token {
     const parent = { inters: [] } as Token
     const ctx = this.contexts[context]
-    let content = '', raw = ''
+    let content = '', raw = '', quoted = false
     const parsers = this.lookup(context)
     while (true) {
       const capture = regExp.exec(source)
@@ -181,6 +186,7 @@ export class Tokenizer {
             return parent
           }
           const token = this.inline(argv)
+          quoted ||= token.quoted
           parent.inters.push(...token.inters.map(inter => ({
             ...inter,
             pos: inter.pos + content.length,
@@ -211,7 +217,7 @@ export class Tokenizer {
         }
       } else {
         parent.rest = source.slice(capture.index + capture[0].length)
-        parent.quoted = capture[0] === ctx?.terminator ? ctx.quoted : false
+        parent.quoted = quoted || capture[0] === ctx?.terminator && ctx.quoted
         parent.terminator = capture[0]
         parent.content = content
         parent.raw = raw + source.slice(0, capture.index)
@@ -236,7 +242,7 @@ export class Tokenizer {
       term = token.terminator
       delete token.rest
 
-      if (token.inters?.length || token.content) {
+      if (token.inters?.length || token.content || token.quoted) {
         tokens.push(token)
       }
     }
@@ -370,31 +376,24 @@ export namespace Tokenizer {
 
     setupElementTokenizer(tokenizer)
 
-    tokenizer.define({
-      initiator: `"`,
-      terminator: `"`,
-      depend: '',
-      parse(source: string) {
-        const argv = tokenizer.parse(source, `"`, '', `"`)
-        return {
-          inline: true,
-          ...argv,
-        }
-      },
-    })
-
-    tokenizer.define({
-      initiator: `'`,
-      terminator: `'`,
-      depend: '',
-      parse(source: string) {
-        const argv = tokenizer.parse(source, `'`, '', `'`)
-        return {
-          inline: true,
-          ...argv,
-        }
-      },
-    })
+    for (const [initiator, terminator] of [[`'`, `'`], [`"`, `"`], ...defaultConfig.compatibilityChineseQuotes ? [[`“`, `”`], [`‘`, `’`]] : []]) {
+      tokenizer.define({
+        initiator,
+        terminator,
+        depend: '',
+        quoted: defaultConfig.compatibilityQuotedFlags.includes(initiator),
+        parse(source: string) {
+          const argv = tokenizer.parse(source, terminator, '', initiator)
+          if (!argv.tokens.length && defaultConfig.compatibilityQuotedFlags.includes(initiator)) {
+            argv.tokens = [{ content: '', raw: '', quoted: true, inters: [], terminator }]
+          }
+          return {
+            inline: true,
+            ...argv,
+          }
+        },
+      })
+    }
 
     if (defaultConfig.enableInterpolation) {
       tokenizer.define({
@@ -446,7 +445,7 @@ export namespace Tokenizer {
             }
           } else {
             return {
-              tokens: [{ content: `\\`, inters: [], quoted: false, terminator: '' }],
+              tokens: [{ content: `\\`, raw: '', inters: [], quoted: false, terminator: '' }],
               rest: source,
               inline: true,
             }
@@ -480,26 +479,27 @@ export namespace Tokenizer {
               rest: source,
             }
           }
-          let content: string
+          let content: string, raw: string
 
           switch (source[0]) {
-            case 'a': content = '\x07'; break
-            case 'b': content = '\b'; break
+            case 'a': content = '\x07'; raw = source[0]; break
+            case 'b': content = '\b'; raw = source[0]; break
             case 'e':
-            case 'E': content = '\x1B'; break
-            case 'f': content = '\f'; break
-            case 'n': content = '\n'; break
-            case 'r': content = '\r'; break
-            case 't': content = '\t'; break
-            case 'v': content = '\v'; break
-            case '\\': content = '\\'; break
-            case '\'': content = '\''; break
-            case '"': content = '"'; break
-            case '?': content = '?'; break
+            case 'E': content = '\x1B'; raw = source[0]; break
+            case 'f': content = '\f'; raw = source[0]; break
+            case 'n': content = '\n'; raw = source[0]; break
+            case 'r': content = '\r'; raw = source[0]; break
+            case 't': content = '\t'; raw = source[0]; break
+            case 'v': content = '\v'; raw = source[0]; break
+            case '\\': content = '\\'; raw = source[0]; break
+            case '\'': content = '\''; raw = source[0]; break
+            case '"': content = '"'; raw = source[0]; break
+            case '?': content = '?'; raw = source[0]; break
             case 'x':
               if (source.length >= 2) {
                 const match = /^x[0-9A-Fa-f]{1,2}/.exec(source)!
                 content = String.fromCharCode(parseInt(match[0].slice(1), 16))
+                raw = match[0]
                 source = source.slice(match[0].length - 1)
               }
               break
@@ -507,6 +507,7 @@ export namespace Tokenizer {
               if (source.length >= 5) {
                 const match = /^u[0-9A-Fa-f]{4}/.exec(source)!
                 content = String.fromCharCode(parseInt(match[0].slice(1), 16))
+                raw = match[0]
                 source = source.slice(match[0].length - 1)
               }
               break
@@ -515,6 +516,7 @@ export namespace Tokenizer {
                 const match = /^U[0-9A-Fa-f]{8}/.exec(source)!
                 const codePoint = parseInt(match[0].slice(1), 16)
                 content = String.fromCodePoint(codePoint)
+                raw = match[0]
                 source = source.slice(match[0].length - 1)
               }
               break
@@ -523,30 +525,34 @@ export namespace Tokenizer {
                 const charCode = source.charCodeAt(1)
                 if ((charCode >= 64 && charCode <= 95) || (charCode >= 96 && charCode <= 127)) {
                   content = String.fromCharCode(charCode % 32)
+                  raw = 'c' + source[1]
                   source = source.slice(1)
                 } else {
                   content = 'c'
+                  raw = source[0]
                 }
               } else {
                 content = 'c'
+                raw = source[0]
               }
               break
             default:
               if (/[0-7]/.test(source[0])) {
                 const match = /^[0-7]{1,3}/.exec(source)!
                 content = String.fromCharCode(parseInt(match[0], 8))
+                raw = match[0]
                 source = source.slice(match[0].length - 1)
               }
           }
           if (content) {
             return {
-              tokens: [{ content, inters: [], quoted: false, terminator: '' }],
+              tokens: [{ content, raw, inters: [], quoted: false, terminator: '' }],
               rest: source.slice(1),
               inline: true,
             }
           } else {
             return {
-              tokens: [{ content: '\\', inters: [], quoted: false, terminator: '' }],
+              tokens: [{ content: '\\', raw: '', inters: [], quoted: false, terminator: '' }],
               rest: source,
               inline: true,
             }

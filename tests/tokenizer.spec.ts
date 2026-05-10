@@ -76,6 +76,54 @@ describe('command', () => {
     expect(parse(`a $'\\ \\\\\\'\\"\\012\\xAA\\u2001\\U0001F600'`)).to.deep.equal([`a`, `\\ \\\'"\x0A\xAA\u2001${String.fromCodePoint(0x1F600)}`])
   })
 
+  it('quoted identity', async () => {
+    const test = (x: string) => expect(identity(x)).to.equal(x)
+    test(`a "b\\ c\\"\\$\\\\\\\`"`)
+    test(`a 'b\\ c'`)
+    test(`a 'b\\ c\\r' 'd\\\\'`)
+    test(`a $'\\ \\a\\b\\e\\E\\f\\n\\r\\t\\v'`)
+    test(`a $'\\ \\\\\\'\\"\\012\\xAA\\u2001\\U0001F600'`)
+
+    // dquote fallback: non-escapeable char after backslash
+    test(`a "b\\Xc"`)
+
+    // ANSI-C fallback: unrecognized escape
+    test(`a $'\\Xbc'`)
+
+    // individual ANSI-C escapes raw integrity
+    const check = (source: string, content: string, raw: string) => {
+      const token = Argv.parse(source).tokens![0]
+      expect(token.content).to.equal(content)
+      expect(token.raw).to.equal(raw)
+      expect(identity(source)).to.equal(source)
+    }
+
+    check(`$'\\n'`, '\n', `$'\\n'`)
+    check(`$'\\t'`, '\t', `$'\\t'`)
+    check(`$'\\r'`, '\r', `$'\\r'`)
+    check(`$'\\\\'`, '\\', `$'\\\\'`)
+    check(`$'\\''`, '\'', `$'\\''`)
+    check(`$'\\"'`, '"', `$'\\"'`)
+    check(`$'\\x41'`, 'A', `$'\\x41'`)
+    check(`$'\\u4e00'`, '\u4e00', `$'\\u4e00'`)
+    check(`$'\\012'`, '\x0A', `$'\\012'`)
+  })
+
+  it('empty quoted', async () => {
+    expect(parse('""')).to.deep.equal([''])
+    expect(parse("''")).to.deep.equal([''])
+    expect(parse('echo ""')).to.deep.equal(['echo', ''])
+    expect(parse('echo "" ""')).to.deep.equal(['echo', '', ''])
+    expect(parse("echo '' ''")).to.deep.equal(['echo', '', ''])
+    expect(parse('"" echo ""')).to.deep.equal(['', 'echo', ''])
+    expect(parse('"a" "" "b"')).to.deep.equal(['a', '', 'b'])
+
+    expect(identity('""')).to.equal('""')
+    expect(identity("''")).to.equal("''")
+    expect(identity('echo ""')).to.equal('echo ""')
+    expect(identity('"" ""')).to.equal('"" ""')
+  })
+
   it('stringify', async () => {
     expect(Argv.stringify(Argv.parse(`"x" $(echo 1)`).tokens![1].inters[0])).to.equal(`echo 1`)
 
