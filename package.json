@@ -1,7 +1,7 @@
 {
   "name": "@hieuzest/koishi-plugin-command",
   "description": "Better command tokenizer",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "main": "lib/index.cjs",
   "module": "lib/index.mjs",
@@ -10,6 +10,14 @@
     "lib",
     "dist"
   ],
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.mjs",
+      "require": "./lib/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
   "author": "Hieuzest <girkirin@hotmail.com>",
   "license": "MIT",
   "repository": {

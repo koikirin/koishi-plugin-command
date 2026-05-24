@@ -426,6 +426,7 @@ export namespace Tokenizer {
           if (!source.length) {
             return {
               error: 'No character follows backslash',
+              tokens: [],
               rest: source,
             }
           } else {
@@ -447,6 +448,7 @@ export namespace Tokenizer {
           if (!source.length) {
             return {
               error: 'No character follows backslash',
+              tokens: [],
               rest: source,
             }
           } else if (allowedCharacters.includes(source[0])) {
@@ -491,6 +493,7 @@ export namespace Tokenizer {
           if (!source.length) {
             return {
               error: 'No character follows backslash',
+              tokens: [],
               rest: source,
             }
           }
